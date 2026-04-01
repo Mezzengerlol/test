@@ -101,8 +101,8 @@
                     let name = row[3] ? row[3].replace(/"/g, '').trim() : "";
                     if (name === "" || name.toLowerCase().includes("total")) continue;
 
-                    let amountStr = row[7] ? row[7].trim() : "0";
-                    let valueStr = row[8] ? row[8].trim() : "0";
+                    let amountStr = row[8] ? row[8].trim() : "0";
+                    let valueStr = row[9] ? row[9].trim() : "0";
                     
                     // Tvätta siffrorna noggrant
                     let amountNum = parseFloat(amountStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
