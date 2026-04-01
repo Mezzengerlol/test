@@ -53,35 +53,45 @@
             if (!res.ok) throw new Error('Kunde inte nå Google Sheets');
             
             const text = await res.text();
+            const rows = text.split(/\r?\n/).map(r => r.split(/[;,]/));
             
-            // Delar upp i rader
-            const rows = text.split(/\r?\n/);
-            const row6 = rows[5]; // Index 5 = Rad 6
-            
-            if (!row6) throw new Error('Rad 6 hittades inte i dokumentet');
+            let totalSum = 0;
+            let foundAnyValue = false;
 
-            // Vi delar upp raden med både komma och semikolon för att vara säkra
-            const cells = row6.split(/[;,]/);
-            
-            let foundVal = null;
-            // Vi letar efter det första talet i rad 6 (vi hoppar över första cellen som ofta är text)
-            for (let i = 1; i < cells.length; i++) {
-                let clean = cells[i].replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
-                let num = parseFloat(clean);
-                if (!isNaN(num) && num > 10) { // Vi antar att portföljen är värd mer än 10kr
-                    foundVal = num;
-                    break;
+            // Vi går igenom varje rad och tittar på kolumn I (vilket är index 8)
+            // Vi börjar från rad 14 (index 13) där dina aktier börjar
+            for (let i = 13; i < rows.length; i++) {
+                let row = rows[i];
+                if (row && row[8]) { // Kolumn I
+                    let clean = row[8].replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
+                    let num = parseFloat(clean);
+                    if (!isNaN(num)) {
+                        totalSum += num;
+                        foundAnyValue = true;
+                    }
                 }
             }
 
-            if (foundVal) {
-                document.getElementById('liveValue').innerText = foundVal.toLocaleString('sv-SE') + ' SEK';
-                document.getElementById('status').innerText = "✅ Synkad: " + new Date().toLocaleTimeString();
+            // Om kolumn I var tom, testa att leta efter summan i rad 6 som förut
+            if (totalSum === 0) {
+                const row6 = rows[5];
+                if (row6) {
+                    for (let cell of row6) {
+                        let clean = cell.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
+                        let num = parseFloat(clean);
+                        if (!isNaN(num) && num > 100) { totalSum = num; foundAnyValue = true; break; }
+                    }
+                }
+            }
+
+            if (foundAnyValue && totalSum > 0) {
+                document.getElementById('liveValue').innerText = totalSum.toLocaleString('sv-SE', {minimumFractionDigits: 2}) + ' SEK';
+                document.getElementById('status').innerText = "✅ Beräknad från kolumn I: " + new Date().toLocaleTimeString();
                 document.getElementById('status').style.color = "#10b981";
-                save(foundVal);
+                save(totalSum);
                 render();
             } else {
-                document.getElementById('status').innerText = "⚠️ Hittade inget tal i rad 6. Kontrollera cell B6, C6 eller D6.";
+                throw new Error('Kunde inte hitta några värden i kolumn I eller rad 6');
             }
         } catch (e) {
             document.getElementById('status').innerText = "❌ Fel: " + e.message;
@@ -91,35 +101,26 @@
 
     function save(v) {
         const m = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'2-digit'});
-        let h = JSON.parse(localStorage.getItem('stocks_v2')) || [];
-        if (!h.find(x => x.m === m)) {
-            h.push({ m, v });
-            localStorage.setItem('stocks_v2', JSON.stringify(h));
-        } else {
-            // Uppdatera värdet för innevarande månad
-            h[h.findIndex(x => x.m === m)].v = v;
-            localStorage.setItem('stocks_v2', JSON.stringify(h));
-        }
+        let h = JSON.parse(localStorage.getItem('stocks_v3')) || [];
+        let i = h.findIndex(x => x.m === m);
+        if (i > -1) h[i].v = v; else h.push({ m, v });
+        localStorage.setItem('stocks_v3', JSON.stringify(h));
     }
 
     function render() {
-        let h = JSON.parse(localStorage.getItem('stocks_v2')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_v3')) || [];
         const body = document.getElementById('tableBody');
-        
-        // Sortera historik så nyast är först i tabellen
         let displayH = [...h].reverse();
         
         body.innerHTML = displayH.map((d, i) => {
             let diff = "---";
             if (i < displayH.length - 1) {
-                let prevV = displayH[i+1].v;
-                let p = ((d.v - prevV) / prevV * 100).toFixed(2);
+                let p = ((d.v - displayH[i+1].v) / displayH[i+1].v * 100).toFixed(2);
                 diff = `<span class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '+' : ''}${p}%</span>`;
             }
             return `<tr><td>${d.m}</td><td>${d.v.toLocaleString('sv-SE')} kr</td><td>${diff}</td></tr>`;
         }).join('');
 
-        // Diagram (äldst till nyast)
         const ctx = document.getElementById('myChart');
         if (window.chartObj) window.chartObj.destroy();
         window.chartObj = new Chart(ctx, {
@@ -135,11 +136,7 @@
                     tension: 0.3 
                 }]
             },
-            options: { 
-                responsive: true, 
-                maintainAspectRatio: false,
-                scales: { y: { beginAtZero: false } }
-            }
+            options: { responsive: true, maintainAspectRatio: false }
         });
     }
 
