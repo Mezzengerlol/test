@@ -53,47 +53,43 @@
             if (!res.ok) throw new Error('Kunde inte nå Google Sheets');
             
             const text = await res.text();
-            // Vi delar upp rader och trimmar bort extra mellanslag
-            const rows = text.split(/\r?\n/).map(r => r.split(/[;,]/).map(cell => cell.trim()));
+            // Dela upp i rader och celler. Vi använder en regex för att hantera eventuella citattecken i CSV:n
+            const rows = text.split(/\r?\n/).map(r => r.split(/[;,]/));
             
             let totalSum = 0;
-            let count = 0;
+            let foundValuesCount = 0;
 
-            // VI GÅR IGENOM RAD 14 TILL 42 (Index 13 till 41)
+            console.log("--- STARTAR LÄSNING AV I14 TILL I42 ---");
+
+            // Loopa strikt från rad 14 (index 13) till rad 42 (index 41)
             for (let i = 13; i <= 41; i++) {
                 let row = rows[i];
                 if (row) {
-                    // Vi letar i kolumn I (index 8), men kollar även kolumn H (7) och J (9) 
-                    // ifall exporten har förskjutit cellerna.
-                    // Vi tar det största talet på raden som ser ut som ett aktievärde.
-                    let rowValues = [];
+                    // Kolumn I är index 8 (A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8)
+                    let cellValue = row[8]; 
                     
-                    // Vi kollar kolumnerna i närheten av "I"
-                    [7, 8, 9, 10].forEach(colIndex => {
-                        if (row[colIndex]) {
-                            let clean = row[colIndex].replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
-                            let num = parseFloat(clean);
-                            if (!isNaN(num) && num > 0) rowValues.push(num);
-                        }
-                    });
+                    if (cellValue) {
+                        // Tvätta strängen: ta bort mellanslag, byt komma mot punkt, ta bort allt utom siffror och punkt
+                        let clean = cellValue.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
+                        let num = parseFloat(clean);
 
-                    if (rowValues.length > 0) {
-                        // Vi antar att det högsta talet på raden i det området är värdet
-                        totalSum += Math.max(...rowValues);
-                        count++;
+                        if (!isNaN(num)) {
+                            totalSum += num;
+                            foundValuesCount++;
+                            console.log(`Rad ${i+1} (Kolumn I): ${num}`);
+                        }
                     }
                 }
             }
 
-            if (totalSum > 0) {
-                document.getElementById('liveValue').innerText = totalSum.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' SEK';
-                document.getElementById('status').innerText = `✅ Summerade ${count} rader från bevakningslistan kl ${new Date().toLocaleTimeString()}`;
+            if (foundValuesCount > 0) {
+                document.getElementById('liveValue').innerText = totalSum.toLocaleString('sv-SE', {minimumFractionDigits: 2}) + ' SEK';
+                document.getElementById('status').innerText = `✅ Summerade ${foundValuesCount} rader från I14:I42`;
                 document.getElementById('status').style.color = "#10b981";
                 save(totalSum);
                 render();
             } else {
-                // Om summeringen misslyckas, testa att hämta summan från rad 6 som backup
-                throw new Error('Kunde inte summera raderna. Kontrollera att kolumn I innehåller siffror.');
+                throw new Error('Hittade inga siffror i kolumn I mellan rad 14 och 42');
             }
         } catch (e) {
             document.getElementById('status').innerText = "❌ Fel: " + e.message;
@@ -101,19 +97,19 @@
         }
     }
 
-    // ... (resten av funktionerna save, render är samma som tidigare)
     function save(v) {
         const m = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'2-digit'});
-        let h = JSON.parse(localStorage.getItem('stocks_v4')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_v5')) || [];
         let i = h.findIndex(x => x.m === m);
         if (i > -1) h[i].v = v; else h.push({ m, v });
-        localStorage.setItem('stocks_v4', JSON.stringify(h));
+        localStorage.setItem('stocks_v5', JSON.stringify(h));
     }
 
     function render() {
-        let h = JSON.parse(localStorage.getItem('stocks_v4')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_v5')) || [];
         const body = document.getElementById('tableBody');
         let displayH = [...h].reverse();
+        
         body.innerHTML = displayH.map((d, i) => {
             let diff = "---";
             if (i < displayH.length - 1) {
@@ -122,17 +118,26 @@
             }
             return `<tr><td>${d.m}</td><td>${d.v.toLocaleString('sv-SE')} kr</td><td>${diff}</td></tr>`;
         }).join('');
+
         const ctx = document.getElementById('myChart');
         if (window.chartObj) window.chartObj.destroy();
         window.chartObj = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: h.map(x => x.m),
-                datasets: [{ label: 'Värde', data: h.map(x => x.v), borderColor: '#10b981', fill: false, tension: 0.3 }]
+                datasets: [{ 
+                    label: 'Värde SEK', 
+                    data: h.map(x => x.v), 
+                    borderColor: '#10b981', 
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true,
+                    tension: 0.3 
+                }]
             },
             options: { responsive: true, maintainAspectRatio: false }
         });
     }
+
     load();
 </script>
 </body>
