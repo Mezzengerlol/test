@@ -82,27 +82,39 @@
         try {
             const res = await fetch(URL + '&cache=' + Date.now());
             const text = await res.text();
-            // Hanterar både komma och semikolon som separator
+            // Vi delar upp raderna. Vi använder en mer precis separation för CSV.
             const rows = text.split(/\r?\n/).map(r => r.split(/[;,]/));
             
             let totalSum = 0;
             let holdings = [];
 
-            // Loopa rad 14 (index 13) till 42 (index 41)
+            // Vi loopar rad 14 till 42 (Index 13 till 41)
             for (let i = 13; i <= 41; i++) {
                 let row = rows[i];
-                if (row && row[3]) { // Kolumn D (Namn)
-                    let name = row[3].replace(/"/g, '').trim();
-                    if (name === "") continue;
+                
+                if (row && row.length >= 9) {
+                    // JUSTERADE INDEX:
+                    // Kolumn D = Index 3 (Namn)
+                    // Kolumn H = Index 7 (Antal)
+                    // Kolumn I = Index 8 (Marknadsvärde)
+                    
+                    let name = row[3] ? row[3].replace(/"/g, '').trim() : "";
+                    if (name === "" || name.toLowerCase().includes("total")) continue;
 
-                    let amount = row[7] ? row[7].trim() : "0"; // Kolumn H (Antal)
-                    let valueStr = row[8] ? row[8].trim() : "0"; // Kolumn I (Värde)
+                    let amountStr = row[7] ? row[7].trim() : "0";
+                    let valueStr = row[8] ? row[8].trim() : "0";
                     
-                    let valueNum = parseFloat(valueStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, ''));
+                    // Tvätta siffrorna noggrant
+                    let amountNum = parseFloat(amountStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
+                    let valueNum = parseFloat(valueStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
                     
-                    if (!isNaN(valueNum) && valueNum > 0) {
+                    if (valueNum > 0) {
                         totalSum += valueNum;
-                        holdings.push({ name, amount, value: valueNum });
+                        holdings.push({ 
+                            name: name, 
+                            amount: amountNum.toLocaleString('sv-SE'), 
+                            value: valueNum 
+                        });
                     }
                 }
             }
@@ -113,42 +125,46 @@
                 document.getElementById('liveValue').innerText = formattedSum;
                 document.getElementById('totalSumFooter').innerText = formattedSum;
                 document.getElementById('totalCount').innerText = holdings.length + " st";
-                document.getElementById('status').innerText = "✅ Senast synkad: " + new Date().toLocaleTimeString();
+                document.getElementById('status').innerText = "✅ Synkad: " + new Date().toLocaleTimeString();
                 
                 save(totalSum);
                 renderHistory();
+            } else {
+                document.getElementById('status').innerText = "⚠️ Hittade inga värden. Kontrollera kolumn I.";
             }
         } catch (e) {
-            document.getElementById('status').innerText = "❌ Kunde inte hämta data";
+            document.getElementById('status').innerText = "❌ Fel vid inläsning";
             console.error(e);
         }
     }
 
     function renderHoldings(data, total) {
         const body = document.getElementById('holdingsBody');
-        // Sortera så största innehavet hamnar överst
+        // Sortera efter värde (störst först)
         data.sort((a, b) => b.value - a.value);
         
         body.innerHTML = data.map(h => `
             <tr>
-                <td style="font-weight:600; color:#1e293b">${h.name}</td>
-                <td style="text-align:right">${h.amount}</td>
+                <td style="font-weight:600;">${h.name}</td>
+                <td style="text-align:right">${h.amount} st</td>
                 <td style="text-align:right">${h.value.toLocaleString('sv-SE')} kr</td>
                 <td style="text-align:right; color:#64748b"><small>${((h.value/total)*100).toFixed(1)}%</small></td>
             </tr>
         `).join('');
     }
 
+    // ... (Behåll funktionerna save() och renderHistory() från förra svaret)
+    
     function save(v) {
         const m = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'2-digit'});
-        let h = JSON.parse(localStorage.getItem('stocks_final_v2')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_v_final')) || [];
         let i = h.findIndex(x => x.m === m);
         if (i > -1) h[i].v = v; else h.push({ m, v });
-        localStorage.setItem('stocks_final_v2', JSON.stringify(h));
+        localStorage.setItem('stocks_v_final', JSON.stringify(h));
     }
 
     function renderHistory() {
-        let h = JSON.parse(localStorage.getItem('stocks_final_v2')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_v_final')) || [];
         const body = document.getElementById('tableBody');
         let displayH = [...h].reverse();
         
@@ -170,29 +186,22 @@
                 datasets: [{ 
                     data: h.map(x => x.v), 
                     borderColor: '#10b981', 
-                    borderWidth: 2,
-                    pointRadius: 0,
                     tension: 0.3,
                     fill: true,
-                    backgroundColor: 'rgba(16, 185, 129, 0.05)'
+                    backgroundColor: 'rgba(16, 185, 129, 0.05)',
+                    pointRadius: 0
                 }]
             },
             options: { 
                 responsive: true, 
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
-                scales: { 
-                    x: { display: false }, 
-                    y: { ticks: { display: false }, grid: { display: false }, border: { display: false } } 
-                }
+                scales: { x: { display: false }, y: { display: false } }
             }
         });
     }
 
     load();
-    // Uppdatera var 5:e minut
-    setInterval(load, 300000);
 </script>
-
 </body>
 </html>
