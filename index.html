@@ -4,64 +4,74 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Min Portfölj</title>
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <style>
-:root { --bg:#f8fafc; --card:#fff; --primary:#10b981; --text:#1e293b; }
-body { font-family:sans-serif; background:var(--bg); margin:0; padding:20px; }
-.container { max-width:1000px; margin:auto; }
-.grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
-.card { background:var(--card); padding:20px; border-radius:12px; }
-.full-width { grid-column:span 2; }
-.val { font-size:2rem; font-weight:bold; color:var(--primary); }
-table { width:100%; border-collapse:collapse; margin-top:10px; }
-td, th { padding:10px; border-bottom:1px solid #eee; }
-.up { color:green; }
-.down { color:red; }
+:root { --bg: #f8fafc; --card: #ffffff; --primary: #10b981; --text: #1e293b; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.5; }
+.container { max-width: 1000px; margin: 0 auto; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+.card { background: var(--card); padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }
+.full-width { grid-column: span 2; }
+.val { font-size: 2.5rem; font-weight: 800; color: var(--primary); margin: 5px 0; letter-spacing: -0.02em; }
+.label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; }
+table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+th { background: #f8fafc; font-size: 0.8rem; color: #64748b; }
+tr:hover { background-color: #fcfcfd; }
+.total-row { background: #f8fafc; font-weight: bold; }
+.up { color: #059669; font-weight: bold; }
+.down { color: #dc2626; font-weight: bold; }
+#chart-wrapper { height: 200px; }
+@media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .full-width { grid-column: span 1; } }
 </style>
 </head>
-
 <body>
+
 <div class="container">
 <div class="grid">
-
 <div class="card">
-<div>Totalt värde</div>
+<div class="label">Totalt Värde</div>
 <div id="liveValue" class="val">0 kr</div>
-<div id="status">Laddar...</div>
+<div id="status" style="font-size: 0.75rem; color: #94a3b8;">Hämtar data...</div>
 </div>
 
 <div class="card">
-<canvas id="myChart" height="150"></canvas>
+<div class="label">Trend (Månadsvis)</div>
+<div id="chart-wrapper">
+<canvas id="myChart"></canvas>
+</div>
 </div>
 
 <div class="card full-width">
+<div class="label">Aktuellt Innehav (D14:I42)</div>
 <table>
 <thead>
-<tr><th>Namn</th><th>Antal</th><th>Värde</th><th>%</th></tr>
+<tr>
+<th>Aktie / Tillgång</th>
+<th style="text-align:right">Antal</th>
+<th style="text-align:right">Värde</th>
+<th style="text-align:right">Andel</th>
+</tr>
 </thead>
 <tbody id="holdingsBody"></tbody>
 <tfoot>
-<tr>
+<tr class="total-row">
 <td>TOTALT</td>
-<td id="totalCount">-</td>
-<td id="totalSumFooter">0 kr</td>
-<td>100%</td>
+<td id="totalCount" style="text-align:right">-</td>
+<td id="totalSumFooter" style="text-align:right">0 kr</td>
+<td style="text-align:right">100%</td>
 </tr>
 </tfoot>
 </table>
 </div>
 
 <div class="card full-width">
+<div class="label">Historik</div>
 <table>
-<thead>
-<tr><th>Månad</th><th>Värde</th><th>Utveckling</th></tr>
-</thead>
+<thead><tr><th>Månad</th><th>Värde</th><th>Utveckling</th></tr></thead>
 <tbody id="tableBody"></tbody>
 </table>
 </div>
-
 </div>
 </div>
 
@@ -69,160 +79,129 @@ td, th { padding:10px; border-bottom:1px solid #eee; }
 const URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQe0EIYoPHqrzuLrHAQqp7ma964lpQih81YiKgBjO9_7SeAX-NWJLtWrl1AyFFUazhhQtQ70LRCc11A/pub?gid=1233054202&single=true&output=csv';
 
 async function load() {
-    try {
-        const res = await fetch(URL + '&t=' + Date.now());
-        const text = await res.text();
+try {
+const res = await fetch(URL + '&cache=' + Date.now());
+const text = await res.text();
+// Vi delar upp raderna. Vi använder en mer precis separation för CSV.
+const rows = text.split(/\r?\n/).map(r => r.split(/[;,]/));
 
-        // Enkel men stabil CSV (Google Sheets = komma)
-        const rows = text.split(/\r?\n/).map(r => r.split(','));
+let totalSum = 0;
+let holdings = [];
 
-        let total = 0;
-        let holdings = [];
+// Vi loopar rad 14 till 42 (Index 13 till 41)
+            for (let i = 14; i <= 42; i++) {
+let row = rows[i];
 
-        for (let i = 13; i <= 41; i++) {
-            const row = rows[i];
-            if (!row || row.length < 9) continue;
+if (row && row.length >= 9) {
+// JUSTERADE INDEX:
+// Kolumn D = Index 3 (Namn)
+// Kolumn H = Index 7 (Antal)
+// Kolumn I = Index 8 (Marknadsvärde)
 
-            const name = (row[3] || '').replace(/"/g,'').trim();
-            if (!name || name.toLowerCase().includes('total')) continue;
+let name = row[3] ? row[3].replace(/"/g, '').trim() : "";
+if (name === "" || name.toLowerCase().includes("total")) continue;
 
-            // ✅ FIXADE INDEX
-            const amount = parseNum(row[7]);
-            const value  = parseNum(row[8]);
+let amountStr = row[8] ? row[8].trim() : "0";
+let valueStr = row[9] ? row[9].trim() : "0";
 
-            if (value > 0) {
-                total += value;
-                holdings.push({ name, amount, value });
-            }
-        }
+// Tvätta siffrorna noggrant
+let amountNum = parseFloat(amountStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
+let valueNum = parseFloat(valueStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
 
-        if (total === 0) {
-            setStatus("⚠️ Ingen data hittades");
-            return;
-        }
-
-        renderHoldings(holdings, total);
-        updateTotals(total, holdings.length);
-        save(total);
-        renderHistory();
-
-        setStatus("✅ Uppdaterad " + new Date().toLocaleTimeString());
-
-    } catch (err) {
-        console.error(err);
-        setStatus("❌ Kunde inte hämta data");
-    }
+if (valueNum > 0) {
+totalSum += valueNum;
+holdings.push({ 
+name: name, 
+amount: amountNum.toLocaleString('sv-SE'), 
+value: valueNum 
+});
+}
+}
 }
 
-// ---------- HELPERS ----------
+if (totalSum > 0) {
+renderHoldings(holdings, totalSum);
+const formattedSum = totalSum.toLocaleString('sv-SE') + ' kr';
+document.getElementById('liveValue').innerText = formattedSum;
+document.getElementById('totalSumFooter').innerText = formattedSum;
+document.getElementById('totalCount').innerText = holdings.length + " st";
+document.getElementById('status').innerText = "✅ Synkad: " + new Date().toLocaleTimeString();
 
-function parseNum(val) {
-    if (!val) return 0;
-    return parseFloat(
-        val.replace(/\s/g,'')
-           .replace(',', '.')
-           .replace(/[^0-9.]/g,'')
-    ) || 0;
+save(totalSum);
+renderHistory();
+} else {
+document.getElementById('status').innerText = "⚠️ Hittade inga värden. Kontrollera kolumn I.";
 }
-
-function setStatus(txt) {
-    document.getElementById('status').innerText = txt;
+} catch (e) {
+document.getElementById('status').innerText = "❌ Fel vid inläsning";
+console.error(e);
 }
-
-function format(n) {
-    return n.toLocaleString('sv-SE') + ' kr';
 }
-
-// ---------- RENDER ----------
 
 function renderHoldings(data, total) {
-    const body = document.getElementById('holdingsBody');
+const body = document.getElementById('holdingsBody');
+// Sortera efter värde (störst först)
+data.sort((a, b) => b.value - a.value);
 
-    data.sort((a,b)=>b.value-a.value);
-
-    body.innerHTML = data.map(h => {
-        const pct = total > 0 ? ((h.value/total)*100).toFixed(1) : 0;
-        return `
-        <tr>
-            <td>${h.name}</td>
-            <td>${h.amount.toLocaleString('sv-SE')}</td>
-            <td>${format(h.value)}</td>
-            <td>${pct}%</td>
-        </tr>`;
-    }).join('');
+body.innerHTML = data.map(h => `
+           <tr>
+               <td style="font-weight:600;">${h.name}</td>
+               <td style="text-align:right">${h.amount} st</td>
+               <td style="text-align:right">${h.value.toLocaleString('sv-SE')} kr</td>
+               <td style="text-align:right; color:#64748b"><small>${((h.value/total)*100).toFixed(1)}%</small></td>
+           </tr>
+       `).join('');
 }
 
-function updateTotals(total, count) {
-    document.getElementById('liveValue').innerText = format(total);
-    document.getElementById('totalSumFooter').innerText = format(total);
-    document.getElementById('totalCount').innerText = count + " st";
-}
-
-// ---------- HISTORY ----------
+// ... (Behåll funktionerna save() och renderHistory() från förra svaret)
 
 function save(v) {
-    const key = 'portfolio_history_v4';
-    const m = new Date().toLocaleDateString('sv-SE',{year:'numeric',month:'2-digit'});
-
-    let h = JSON.parse(localStorage.getItem(key)) || [];
-    const i = h.findIndex(x=>x.m===m);
-
-    if (i>-1) h[i].v = v;
-    else h.push({m,v});
-
-    localStorage.setItem(key, JSON.stringify(h));
+const m = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'2-digit'});
+let h = JSON.parse(localStorage.getItem('stocks_v_final')) || [];
+let i = h.findIndex(x => x.m === m);
+if (i > -1) h[i].v = v; else h.push({ m, v });
+localStorage.setItem('stocks_v_final', JSON.stringify(h));
 }
 
 function renderHistory() {
-    const key = 'portfolio_history_v4';
-    let h = JSON.parse(localStorage.getItem(key)) || [];
-    let list = [...h].reverse();
+let h = JSON.parse(localStorage.getItem('stocks_v_final')) || [];
+const body = document.getElementById('tableBody');
+let displayH = [...h].reverse();
 
-    const body = document.getElementById('tableBody');
-
-    body.innerHTML = list.map((d,i)=>{
-        let diff = "-";
-        if (i < list.length-1) {
-            const p = ((d.v - list[i+1].v)/list[i+1].v*100).toFixed(2);
-            diff = `<span class="${p>=0?'up':'down'}">${p>=0?'+':''}${p}%</span>`;
-        }
-        return `<tr><td>${d.m}</td><td>${format(d.v)}</td><td>${diff}</td></tr>`;
-    }).join('');
-
-    drawChart(h);
+body.innerHTML = displayH.map((d, i) => {
+let diff = "---";
+if (i < displayH.length - 1) {
+let p = ((d.v - displayH[i+1].v) / displayH[i+1].v * 100).toFixed(2);
+diff = `<span class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '+' : ''}${p}%</span>`;
 }
+return `<tr><td>${d.m}</td><td>${d.v.toLocaleString()} kr</td><td>${diff}</td></tr>`;
+}).join('');
 
-// ---------- CHART ----------
-
-function drawChart(h) {
-    const ctx = document.getElementById('myChart').getContext('2d');
-
-    if (window.chart) window.chart.destroy();
-
-    window.chart = new Chart(ctx, {
-        type:'line',
-        data:{
-            labels:h.map(x=>x.m),
-            datasets:[{
-                data:h.map(x=>x.v),
-                borderColor:'#10b981',
-                backgroundColor:'rgba(16,185,129,0.1)',
-                fill:true,
-                tension:0.3
-            }]
-        },
-        options:{
-            plugins:{legend:{display:false}},
-            scales:{x:{display:false},y:{display:false}}
-        }
-    });
+const ctx = document.getElementById('myChart');
+if (window.chartObj) window.chartObj.destroy();
+window.chartObj = new Chart(ctx, {
+type: 'line',
+data: {
+labels: h.map(x => x.m),
+datasets: [{ 
+data: h.map(x => x.v), 
+borderColor: '#10b981', 
+tension: 0.3,
+fill: true,
+backgroundColor: 'rgba(16, 185, 129, 0.05)',
+pointRadius: 0
+}]
+},
+options: { 
+responsive: true, 
+maintainAspectRatio: false,
+plugins: { legend: { display: false } },
+scales: { x: { display: false }, y: { display: false } }
 }
-
-// ---------- START ----------
+});
+}
 
 load();
-setInterval(load, 300000);
 </script>
-
 </body>
 </html>
