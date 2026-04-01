@@ -3,44 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aktieportfölj Dashboard</title>
+    <title>Min Portfölj</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --bg: #f8fafc; --card: #ffffff; --primary: #10b981; --text: #1e293b; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .card { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 20px; border: 1px solid #e2e8f0; }
-        .val { font-size: 2.5rem; font-weight: bold; color: var(--primary); margin: 10px 0; }
-        .label { font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: 600; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.5; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .card { background: var(--card); padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }
+        .full-width { grid-column: span 2; }
+        .val { font-size: 2.5rem; font-weight: 800; color: var(--primary); margin: 5px 0; letter-spacing: -0.02em; }
+        .label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+        th { background: #f8fafc; font-size: 0.8rem; color: #64748b; }
+        tr:hover { background-color: #fcfcfd; }
+        .total-row { background: #f8fafc; font-weight: bold; }
         .up { color: #059669; font-weight: bold; }
         .down { color: #dc2626; font-weight: bold; }
-        #chart-container { height: 300px; }
+        #chart-wrapper { height: 200px; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .full-width { grid-column: span 1; } }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="card">
-        <div class="label">Aktuellt Portföljvärde</div>
-        <div id="liveValue" class="val">Hämtar data...</div>
-        <div id="status" style="font-size: 0.8rem;">Ansluter till Google...</div>
-    </div>
-
-    <div class="card">
-        <div class="label">Historisk utveckling</div>
-        <div id="chart-container">
-            <canvas id="myChart"></canvas>
+    <div class="grid">
+        <div class="card">
+            <div class="label">Totalt Värde</div>
+            <div id="liveValue" class="val">0 kr</div>
+            <div id="status" style="font-size: 0.75rem; color: #94a3b8;">Hämtar data...</div>
         </div>
-    </div>
 
-    <div class="card">
-        <div class="label">Månadslogg</div>
-        <table>
-            <thead><tr><th>Månad</th><th>Värde</th><th>+/-</th></tr></thead>
-            <tbody id="tableBody"></tbody>
-        </table>
+        <div class="card">
+            <div class="label">Trend (Månadsvis)</div>
+            <div id="chart-wrapper">
+                <canvas id="myChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card full-width">
+            <div class="label">Aktuellt Innehav (D14:I42)</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Aktie / Tillgång</th>
+                        <th style="text-align:right">Antal</th>
+                        <th style="text-align:right">Värde</th>
+                        <th style="text-align:right">Andel</th>
+                    </tr>
+                </thead>
+                <tbody id="holdingsBody"></tbody>
+                <tfoot>
+                    <tr class="total-row">
+                        <td>TOTALT</td>
+                        <td id="totalCount" style="text-align:right">-</td>
+                        <td id="totalSumFooter" style="text-align:right">0 kr</td>
+                        <td style="text-align:right">100%</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <div class="card full-width">
+            <div class="label">Historik</div>
+            <table>
+                <thead><tr><th>Månad</th><th>Värde</th><th>Utveckling</th></tr></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
     </div>
 </div>
 
@@ -49,64 +80,75 @@
 
     async function load() {
         try {
-            const res = await fetch(URL + '&cachebuster=' + Date.now());
-            if (!res.ok) throw new Error('Kunde inte nå Google Sheets');
-            
+            const res = await fetch(URL + '&cache=' + Date.now());
             const text = await res.text();
-            // Dela upp i rader och celler. Vi använder en regex för att hantera eventuella citattecken i CSV:n
+            // Hanterar både komma och semikolon som separator
             const rows = text.split(/\r?\n/).map(r => r.split(/[;,]/));
             
             let totalSum = 0;
-            let foundValuesCount = 0;
+            let holdings = [];
 
-            console.log("--- STARTAR LÄSNING AV I14 TILL I42 ---");
-
-            // Loopa strikt från rad 14 (index 13) till rad 42 (index 41)
+            // Loopa rad 14 (index 13) till 42 (index 41)
             for (let i = 13; i <= 41; i++) {
                 let row = rows[i];
-                if (row) {
-                    // Kolumn I är index 8 (A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8)
-                    let cellValue = row[8]; 
-                    
-                    if (cellValue) {
-                        // Tvätta strängen: ta bort mellanslag, byt komma mot punkt, ta bort allt utom siffror och punkt
-                        let clean = cellValue.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
-                        let num = parseFloat(clean);
+                if (row && row[3]) { // Kolumn D (Namn)
+                    let name = row[3].replace(/"/g, '').trim();
+                    if (name === "") continue;
 
-                        if (!isNaN(num)) {
-                            totalSum += num;
-                            foundValuesCount++;
-                            console.log(`Rad ${i+1} (Kolumn I): ${num}`);
-                        }
+                    let amount = row[7] ? row[7].trim() : "0"; // Kolumn H (Antal)
+                    let valueStr = row[8] ? row[8].trim() : "0"; // Kolumn I (Värde)
+                    
+                    let valueNum = parseFloat(valueStr.replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, ''));
+                    
+                    if (!isNaN(valueNum) && valueNum > 0) {
+                        totalSum += valueNum;
+                        holdings.push({ name, amount, value: valueNum });
                     }
                 }
             }
 
-            if (foundValuesCount > 0) {
-                document.getElementById('liveValue').innerText = totalSum.toLocaleString('sv-SE', {minimumFractionDigits: 2}) + ' SEK';
-                document.getElementById('status').innerText = `✅ Summerade ${foundValuesCount} rader från I14:I42`;
-                document.getElementById('status').style.color = "#10b981";
+            if (totalSum > 0) {
+                renderHoldings(holdings, totalSum);
+                const formattedSum = totalSum.toLocaleString('sv-SE') + ' kr';
+                document.getElementById('liveValue').innerText = formattedSum;
+                document.getElementById('totalSumFooter').innerText = formattedSum;
+                document.getElementById('totalCount').innerText = holdings.length + " st";
+                document.getElementById('status').innerText = "✅ Senast synkad: " + new Date().toLocaleTimeString();
+                
                 save(totalSum);
-                render();
-            } else {
-                throw new Error('Hittade inga siffror i kolumn I mellan rad 14 och 42');
+                renderHistory();
             }
         } catch (e) {
-            document.getElementById('status').innerText = "❌ Fel: " + e.message;
-            document.getElementById('status').style.color = "#ef4444";
+            document.getElementById('status').innerText = "❌ Kunde inte hämta data";
+            console.error(e);
         }
+    }
+
+    function renderHoldings(data, total) {
+        const body = document.getElementById('holdingsBody');
+        // Sortera så största innehavet hamnar överst
+        data.sort((a, b) => b.value - a.value);
+        
+        body.innerHTML = data.map(h => `
+            <tr>
+                <td style="font-weight:600; color:#1e293b">${h.name}</td>
+                <td style="text-align:right">${h.amount}</td>
+                <td style="text-align:right">${h.value.toLocaleString('sv-SE')} kr</td>
+                <td style="text-align:right; color:#64748b"><small>${((h.value/total)*100).toFixed(1)}%</small></td>
+            </tr>
+        `).join('');
     }
 
     function save(v) {
         const m = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'2-digit'});
-        let h = JSON.parse(localStorage.getItem('stocks_v5')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_final_v2')) || [];
         let i = h.findIndex(x => x.m === m);
         if (i > -1) h[i].v = v; else h.push({ m, v });
-        localStorage.setItem('stocks_v5', JSON.stringify(h));
+        localStorage.setItem('stocks_final_v2', JSON.stringify(h));
     }
 
-    function render() {
-        let h = JSON.parse(localStorage.getItem('stocks_v5')) || [];
+    function renderHistory() {
+        let h = JSON.parse(localStorage.getItem('stocks_final_v2')) || [];
         const body = document.getElementById('tableBody');
         let displayH = [...h].reverse();
         
@@ -116,7 +158,7 @@
                 let p = ((d.v - displayH[i+1].v) / displayH[i+1].v * 100).toFixed(2);
                 diff = `<span class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '+' : ''}${p}%</span>`;
             }
-            return `<tr><td>${d.m}</td><td>${d.v.toLocaleString('sv-SE')} kr</td><td>${diff}</td></tr>`;
+            return `<tr><td>${d.m}</td><td>${d.v.toLocaleString()} kr</td><td>${diff}</td></tr>`;
         }).join('');
 
         const ctx = document.getElementById('myChart');
@@ -126,19 +168,31 @@
             data: {
                 labels: h.map(x => x.m),
                 datasets: [{ 
-                    label: 'Värde SEK', 
                     data: h.map(x => x.v), 
                     borderColor: '#10b981', 
-                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
                     fill: true,
-                    tension: 0.3 
+                    backgroundColor: 'rgba(16, 185, 129, 0.05)'
                 }]
             },
-            options: { responsive: true, maintainAspectRatio: false }
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { 
+                    x: { display: false }, 
+                    y: { ticks: { display: false }, grid: { display: false }, border: { display: false } } 
+                }
+            }
         });
     }
 
     load();
+    // Uppdatera var 5:e minut
+    setInterval(load, 300000);
 </script>
+
 </body>
 </html>
