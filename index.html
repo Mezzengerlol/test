@@ -49,53 +49,97 @@
 
     async function load() {
         try {
-            const res = await fetch(URL);
-            const data = await res.text();
-            const rows = data.split('\n').map(r => r.split(','));
+            const res = await fetch(URL + '&cachebuster=' + Date.now());
+            if (!res.ok) throw new Error('Kunde inte nå Google Sheets');
             
-            // Vi letar i rad 6 (index 5)
-            let val = parseFloat(rows[5][1].replace(/[^0-9,.]/g, '').replace(',', '.')) || 
-                      parseFloat(rows[5][2]) || parseFloat(rows[5][3]);
+            const text = await res.text();
+            
+            // Delar upp i rader
+            const rows = text.split(/\r?\n/);
+            const row6 = rows[5]; // Index 5 = Rad 6
+            
+            if (!row6) throw new Error('Rad 6 hittades inte i dokumentet');
 
-            if (val) {
-                document.getElementById('liveValue').innerText = val.toLocaleString('sv-SE') + ' SEK';
-                document.getElementById('status').innerText = "✅ Uppdaterad: " + new Date().toLocaleTimeString();
-                save(val);
+            // Vi delar upp raden med både komma och semikolon för att vara säkra
+            const cells = row6.split(/[;,]/);
+            
+            let foundVal = null;
+            // Vi letar efter det första talet i rad 6 (vi hoppar över första cellen som ofta är text)
+            for (let i = 1; i < cells.length; i++) {
+                let clean = cells[i].replace(/\s/g, '').replace(',', '.').replace(/[^0-9.]/g, '');
+                let num = parseFloat(clean);
+                if (!isNaN(num) && num > 10) { // Vi antar att portföljen är värd mer än 10kr
+                    foundVal = num;
+                    break;
+                }
+            }
+
+            if (foundVal) {
+                document.getElementById('liveValue').innerText = foundVal.toLocaleString('sv-SE') + ' SEK';
+                document.getElementById('status').innerText = "✅ Synkad: " + new Date().toLocaleTimeString();
+                document.getElementById('status').style.color = "#10b981";
+                save(foundVal);
                 render();
+            } else {
+                document.getElementById('status').innerText = "⚠️ Hittade inget tal i rad 6. Kontrollera cell B6, C6 eller D6.";
             }
         } catch (e) {
-            document.getElementById('status').innerText = "❌ Fel vid hämtning";
+            document.getElementById('status').innerText = "❌ Fel: " + e.message;
+            document.getElementById('status').style.color = "#ef4444";
         }
     }
 
     function save(v) {
-        const m = new Date().toISOString().slice(0, 7); // t.ex "2024-03"
-        let h = JSON.parse(localStorage.getItem('stocks')) || [];
-        let i = h.findIndex(x => x.m === m);
-        if (i > -1) h[i].v = v; else h.push({ m, v });
-        localStorage.setItem('stocks', JSON.stringify(h));
+        const m = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'2-digit'});
+        let h = JSON.parse(localStorage.getItem('stocks_v2')) || [];
+        if (!h.find(x => x.m === m)) {
+            h.push({ m, v });
+            localStorage.setItem('stocks_v2', JSON.stringify(h));
+        } else {
+            // Uppdatera värdet för innevarande månad
+            h[h.findIndex(x => x.m === m)].v = v;
+            localStorage.setItem('stocks_v2', JSON.stringify(h));
+        }
     }
 
     function render() {
-        let h = JSON.parse(localStorage.getItem('stocks')) || [];
+        let h = JSON.parse(localStorage.getItem('stocks_v2')) || [];
         const body = document.getElementById('tableBody');
-        body.innerHTML = h.reverse().map((d, i) => {
+        
+        // Sortera historik så nyast är först i tabellen
+        let displayH = [...h].reverse();
+        
+        body.innerHTML = displayH.map((d, i) => {
             let diff = "---";
-            if (i < h.length - 1) {
-                let p = ((d.v - h[i+1].v) / h[i+1].v * 100).toFixed(2);
+            if (i < displayH.length - 1) {
+                let prevV = displayH[i+1].v;
+                let p = ((d.v - prevV) / prevV * 100).toFixed(2);
                 diff = `<span class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '+' : ''}${p}%</span>`;
             }
-            return `<tr><td>${d.m}</td><td>${d.v.toLocaleString()} kr</td><td>${diff}</td></tr>`;
+            return `<tr><td>${d.m}</td><td>${d.v.toLocaleString('sv-SE')} kr</td><td>${diff}</td></tr>`;
         }).join('');
 
-        h.reverse();
-        new Chart(document.getElementById('myChart'), {
+        // Diagram (äldst till nyast)
+        const ctx = document.getElementById('myChart');
+        if (window.chartObj) window.chartObj.destroy();
+        window.chartObj = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: h.map(x => x.m),
-                datasets: [{ label: 'Värde', data: h.map(x => x.v), borderColor: '#10b981', fill: false, tension: 0.3 }]
+                datasets: [{ 
+                    label: 'Värde SEK', 
+                    data: h.map(x => x.v), 
+                    borderColor: '#10b981', 
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true,
+                    tension: 0.3 
+                }]
             },
-            options: { responsive: true, maintainAspectRatio: false }
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: false } }
+            }
         });
     }
 
